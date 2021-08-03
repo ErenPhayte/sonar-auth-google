@@ -123,46 +123,39 @@ public class GoogleIdentityProvider implements OAuth2IdentityProvider {
     Token accessToken = scribe.getAccessToken(EMPTY_TOKEN, new Verifier(oAuthVerifier));
 
     GsonUser gsonUser = requestUser(scribe, accessToken);
-    String redirectTo;
-    if (settings.oauthDomain()==null || (checkValidDomain(settings.oauthDomain(), gsonUser.getEmail()))) {
-        redirectTo = settings.getSonarBaseURL();
-        String referer_url = request.getHeader("referer");
-        try {
-            URL urlObj = new URL(referer_url);
-            String returnToValue = null;
-            for( String param : urlObj.getQuery().split("&")) {
-                if( param.startsWith("return_to=")){
-                    System.out.println("Return_to param : " + param);
-                    System.out.println("Web context : " + settings.getWebContext());
-                    param = URLDecoder.decode(param,"UTF-8");
-                    returnToValue = param.split("=",2)[1].replace(settings.getWebContext(),"");
-                }
-            }
-            if(returnToValue != null){
-                redirectTo = redirectTo.concat(returnToValue);
-            }
-        } catch(Exception e) {
-            LOGGER.trace("Exception while parsing return to URL");
-        }
+
+    if (domainIsAllowed(gsonUser.getEmail()) ) {
       UserIdentity userIdentity = userIdentityFactory.create(gsonUser);
       context.authenticate(userIdentity);
+      context.redirectToRequestedPage();
     } else {
-      redirectTo = settings.getSonarBaseURL()+"/sessions/unauthorized#";
-    }
-    try {
-      context.getResponse().sendRedirect(redirectTo);
-    } catch (IOException ioe) {
-      throw MessageException.of("Unable to redirect after OAuth login", ioe);
-    }
-  }
-
-  private Boolean checkValidDomain(String oAuthDomains, String userEmail) {
-    for (String domain : oAuthDomains.split(",")) {
-      if (userEmail.trim().endsWith("@" + domain.trim())) {
-        return true;
+      try {
+        context.getResponse().sendRedirect(settings.getSonarBaseURL()+"/sessions/unauthorized#");
+      } catch (IOException ioe) {
+        throw MessageException.of("Unable to redirect after OAuth login", ioe);
       }
     }
-    return false;
+    
+  }
+
+  private Boolean domainIsAllowed(String email) {
+
+      if (settings.oauthDomain()==null) {
+          return true;
+      }
+
+      Boolean domainWhitelisted = true;
+
+      if (settings.oauthDomain()!=null) {
+          domainWhitelisted = false;
+
+          for ( String allowedDomain : settings.oauthDomain().split(",")) {
+              if (email.endsWith("@"+allowedDomain.replaceAll(" ", ""))) {
+                  domainWhitelisted = true;
+              }
+          }
+      }
+      return domainWhitelisted;
   }
 
   private GsonUser requestUser(OAuthService scribe, Token accessToken) {
